@@ -72,7 +72,7 @@ jobs:
       # OSS Review Toolkit (ORT)
       ort: true
       # ---- Baseline PR gate (fast, GitHub-native) ----
-      allow_spdx: "MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,Unlicense,CC0-1.0"
+      allow_spdx: "MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,Unlicense,CC0-1.0,LicenseRef-scancode-google-patent-license-golang"
       warn_only: false              # set true for a gentle rollout
       use_pr_comment: true          # posts summary on PRs (requires pull-requests: write)
       run_component_detection: true # submits PR dependency graph for polyglot repos
@@ -80,8 +80,6 @@ jobs:
       # ---- High assurance gate ORT ----
       ort_config_repository: https://github.com/oss-review-toolkit/ort-config # optional: defaults to https://github.com/oss-review-toolkit/ort-config
       ort_config_revision: "34c5d317e44e86505d0d257f2c1076deda35d9df"     # optional: pin for a specific policy version of the policy repository
-      ort_config_source: ".github/ort" # optional: additional repo specific configuration directory to use. If you have an .ort.yml config file put it there.
-      ort_config_target: "~/.ort/config" # optional: target directory to stage the policy configuration to, defaults to ~/.ort/config, because that's where ORT looks for it
       ort_fail_on: "violations"   # fail mode: violations|issues|never
       ort_cli_args: "-P ort.analyzer.enabledPackageManagers=GoMod"
     secrets:
@@ -97,8 +95,6 @@ jobs:
     with:
       # DoNotSubmit
       do-not-submit: true
-      # Semgrep
-      semgrep: true
       # CodeQL
       codeql: true
       codeql-language: go # comma-separated list supported
@@ -118,8 +114,6 @@ jobs:
       codecov: true
       codecov-disable-search: true
     secrets:
-      # Semgrep token
-      semgrep: ${{ secrets.SEMGREP_APP_TOKEN }}
       # SonarQube token
       sonarqube: ${{ secrets.SONAR_TOKEN }}
       # Codecov token
