@@ -1,0 +1,167 @@
+name: Verify E2E (PR)
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - go.mod
+      - go.sum
+      - .golangci.yml
+      - cmd/**
+      - internal/**
+      - examples/**
+      - .github/workflows/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-readonly-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERIFY_SOURCE_REPO: bytemare/.github
+      VERIFY_SOURCE_SHA: 63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7
+      VERIFY_SOURCE_SELECTOR: commit:63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7
+      VERIFY_SOURCE_FILE: README.md
+      VERIFY_TARGET_FILE: docs/upstream/bytemare-github-README.md
+      VERIFY_CONFIG_PATH: .github/.doclane.yml
+      VERIFY_LOCKFILE_PATH: .github/.doclane.lock.yml
+      VERIFY_MANIFEST_PATH: doclane-sync-manifest.json
+    steps:
+      - name: Checkout action source
+        # Pin to immutable SHAs in production repositories.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          path: action-src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare consumer fixture repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github docs/upstream .e2e
+          cat > "${VERIFY_CONFIG_PATH}" <<EOF
+          version: 1
+
+          source:
+            repo: ${VERIFY_SOURCE_REPO}
+            selector: ${VERIFY_SOURCE_SELECTOR}
+            allow_latest: false
+            enforce_signed_tags: false
+
+          policy:
+            mode: warn
+            path: .doclane-policy.yml
+
+          sync:
+            - id: upstream_readme
+              source: ${VERIFY_SOURCE_FILE}
+              target: ${VERIFY_TARGET_FILE}
+          EOF
+
+      - name: Run Doclane (first pass)
+        id: first_run
+        uses: ./action-src
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          config-path: ${{ env.VERIFY_CONFIG_PATH }}
+          lockfile-path: ${{ env.VERIFY_LOCKFILE_PATH }}
+          manifest-path: ${{ env.VERIFY_MANIFEST_PATH }}
+          source-repo-allowlist: bytemare/*
+          create-pr: "false"
+          commit-signoff: "false"
+          commit-sign: "false"
+          template-strict: "true"
+
+      - name: Assert first-pass outputs and artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ steps.first_run.outputs.noop }}" == "false" ]]
+          [[ "${{ steps.first_run.outputs.resolved-sha }}" == "${VERIFY_SOURCE_SHA}" ]]
+          [[ -z "${{ steps.first_run.outputs.pr-url }}" ]]
+
+          test -s "${VERIFY_TARGET_FILE}"
+          test -s "${VERIFY_LOCKFILE_PATH}"
+          test -s "${VERIFY_MANIFEST_PATH}"
+
+          grep -Eq '^[[:space:]]+source_repo: bytemare/.github$' "${VERIFY_LOCKFILE_PATH}"
+          grep -Eq "^[[:space:]]+selector: ${VERIFY_SOURCE_SELECTOR}$" "${VERIFY_LOCKFILE_PATH}"
+          grep -Eq "^[[:space:]]+commit_sha: ${VERIFY_SOURCE_SHA}$" "${VERIFY_LOCKFILE_PATH}"
+          grep -Eq '^[[:space:]]+- id: upstream_readme$' "${VERIFY_LOCKFILE_PATH}"
+          grep -Eq "^[[:space:]]+target: ${VERIFY_TARGET_FILE}$" "${VERIFY_LOCKFILE_PATH}"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("doclane-sync-manifest.json").read_text())
+          assert manifest["source_repo"] == "bytemare/.github", manifest
+          assert manifest["selector"] == "commit:63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7", manifest
+          assert manifest["commit_sha"] == "63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7", manifest
+          files = manifest.get("files", [])
+          assert files, manifest
+          matches = [f for f in files if f.get("target") == "docs/upstream/bytemare-github-README.md"]
+          assert matches, files
+          assert matches[0]["changed"] is True, matches[0]
+          PY
+
+          cp "${VERIFY_TARGET_FILE}" .e2e/first-target.txt
+          cp "${VERIFY_LOCKFILE_PATH}" .e2e/first-lock.yml
+          cp "${VERIFY_MANIFEST_PATH}" .e2e/first-manifest.json
+
+      - name: Run Doclane (second pass / no-op check)
+        id: second_run
+        uses: ./action-src
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          config-path: ${{ env.VERIFY_CONFIG_PATH }}
+          lockfile-path: ${{ env.VERIFY_LOCKFILE_PATH }}
+          manifest-path: ${{ env.VERIFY_MANIFEST_PATH }}
+          source-repo-allowlist: bytemare/*
+          create-pr: "false"
+          commit-signoff: "false"
+          commit-sign: "false"
+          template-strict: "true"
+
+      - name: Assert no-op behavior on second pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ steps.second_run.outputs.noop }}" == "true" ]]
+          [[ "${{ steps.second_run.outputs.resolved-sha }}" == "${VERIFY_SOURCE_SHA}" ]]
+          [[ -z "${{ steps.second_run.outputs.pr-url }}" ]]
+
+          cmp -s .e2e/first-target.txt "${VERIFY_TARGET_FILE}"
+          cmp -s .e2e/first-lock.yml "${VERIFY_LOCKFILE_PATH}"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          first = json.loads(Path(".e2e/first-manifest.json").read_text())
+          second = json.loads(Path("doclane-sync-manifest.json").read_text())
+          assert first["commit_sha"] == second["commit_sha"] == "63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7"
+          assert second["files"], second
+          assert all(f.get("changed") is False for f in second["files"]), second["files"]
+          PY
+
+      - name: Upload E2E artifacts on failure
+        if: failure()
+        # Pin to immutable SHAs in production repositories.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verify-e2e-pr-artifacts
+          if-no-files-found: ignore
+          path: |
+            .github/.doclane.yml
+            .github/.doclane.lock.yml
+            doclane-sync-manifest.json
+            docs/upstream/**
+            .e2e/**

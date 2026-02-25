@@ -1,0 +1,21 @@
+version: 1
+
+required:
+  - id: code_of_conduct
+    source: open-source/CODE_OF_CONDUCT.md
+    target: docs/CODE_OF_CONDUCT.md
+
+constraints:
+  allowed_target_prefixes:
+    - docs/
+    - .github/
+  require_dco: true
+  require_commit_signing: true
+  template_mode: simple_placeholders_only
+
+source_requirements:
+  allow_selectors:
+    - latest
+    - tag:*
+    - commit:*
+  require_signed_tags: true

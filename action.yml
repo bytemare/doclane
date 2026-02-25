@@ -1,0 +1,118 @@
+name: Doclane
+description: Sync governed shared docs into consumer repositories with lockfile/provenance tracking.
+
+inputs:
+  github-token:
+    description: GitHub token with read access to source repo and write access to consumer repo PRs.
+    required: true
+  config-path:
+    description: Path to `.github/.doclane.yml` in the consumer repository.
+    required: false
+    default: .github/.doclane.yml
+  lockfile-path:
+    description: Path to `.github/.doclane.lock.yml` in the consumer repository.
+    required: false
+    default: .github/.doclane.lock.yml
+  manifest-path:
+    description: Path for the generated manifest JSON artifact file (relative to consumer repo root).
+    required: false
+    default: doclane-sync-manifest.json
+  source-repo-allowlist:
+    description: Comma-separated allowlist patterns for source repos (e.g. org/*).
+    required: false
+    default: ""
+  create-pr:
+    description: Whether to create/update a PR for changes.
+    required: false
+    default: "true"
+  pr-branch-prefix:
+    description: Branch prefix for generated sync branches.
+    required: false
+    default: chore/doclane-sync
+  pr-base:
+    description: Optional base branch for the generated PR.
+    required: false
+    default: ""
+  pr-title-prefix:
+    description: PR title prefix.
+    required: false
+    default: chore(doclane): sync shared docs
+  commit-signoff:
+    description: Add DCO sign-off to generated commits.
+    required: false
+    default: "true"
+  commit-sign:
+    description: Pass `-S` to git commit (requires SSH/GPG signing to be configured before the action runs).
+    required: false
+    default: "true"
+  template-strict:
+    description: Fail when template variables are missing or unused.
+    required: false
+    default: "true"
+  dry-run:
+    description: Resolve/render only without writing files or creating a PR.
+    required: false
+    default: "false"
+  git-user-name:
+    description: Git user.name for generated commits.
+    required: false
+    default: doclane[bot]
+  git-user-email:
+    description: Git user.email for generated commits.
+    required: false
+    default: 41898282+github-actions[bot]@users.noreply.github.com
+  go-version:
+    description: Go version used to build the Doclane binary in the action runtime.
+    required: false
+    default: "1.26.0"
+
+outputs:
+  noop:
+    description: Whether the sync was a no-op.
+    value: ${{ steps.sync.outputs.noop }}
+  resolved-sha:
+    description: Resolved immutable source commit SHA.
+    value: ${{ steps.sync.outputs.resolved-sha }}
+  pr-url:
+    description: URL of the created or reused PR.
+    value: ${{ steps.sync.outputs.pr-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - name: Build Doclane
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        go build -trimpath -o "$RUNNER_TEMP/doclane" ./cmd/doclane
+
+    - name: Run Doclane sync
+      id: sync
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        "$RUNNER_TEMP/doclane" sync \
+          --workdir "${{ github.workspace }}" \
+          --config-path "${{ inputs.config-path }}" \
+          --lockfile-path "${{ inputs.lockfile-path }}" \
+          --manifest-path "${{ inputs.manifest-path }}" \
+          --github-token "${{ inputs.github-token }}" \
+          --source-repo-allowlist "${{ inputs.source-repo-allowlist }}" \
+          --create-pr="${{ inputs.create-pr }}" \
+          --pr-branch-prefix "${{ inputs.pr-branch-prefix }}" \
+          --pr-base "${{ inputs.pr-base }}" \
+          --pr-title-prefix "${{ inputs.pr-title-prefix }}" \
+          --commit-signoff="${{ inputs.commit-signoff }}" \
+          --commit-sign="${{ inputs.commit-sign }}" \
+          --template-strict="${{ inputs.template-strict }}" \
+          --dry-run="${{ inputs.dry-run }}" \
+          --git-user-name "${{ inputs.git-user-name }}" \
+          --git-user-email "${{ inputs.git-user-email }}"
