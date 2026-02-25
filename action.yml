@@ -50,7 +50,7 @@ inputs:
     required: false
     default: "true"
   dry-run:
-    description: Resolve/render only without writing files or creating a PR.
+    description: Resolve/render only without writing files (including manifest/lockfile/targets) or creating a PR.
     required: false
     default: "false"
   git-user-name:
@@ -61,11 +61,6 @@ inputs:
     description: Git user.email for generated commits.
     required: false
     default: 41898282+github-actions[bot]@users.noreply.github.com
-  go-version:
-    description: Go version used to build the Doclane binary in the action runtime.
-    required: false
-    default: "1.26.0"
-
 outputs:
   noop:
     description: Whether the sync was a no-op.
@@ -83,7 +78,7 @@ runs:
     - name: Setup Go
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
       with:
-        go-version: ${{ inputs.go-version }}
+        go-version: "1.26.0"
 
     - name: Build Doclane
       shell: bash

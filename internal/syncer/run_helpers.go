@@ -59,13 +59,19 @@ func stageFiles(
 		}
 
 		current, err := os.ReadFile(targetPath)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, nil, fmt.Errorf("read existing target %s: %w", entry.Target, err)
+		targetExists := true
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				targetExists = false
+				current = nil
+			} else {
+				return nil, nil, fmt.Errorf("read existing target %s: %w", entry.Target, err)
+			}
 		}
 
 		upstreamSHA := hashutil.SHA256Hex(upstream)
 		renderedSHA := hashutil.SHA256Hex(rendered)
-		changed := !bytes.Equal(current, rendered)
+		changed := !targetExists || !bytes.Equal(current, rendered)
 
 		results = append(results, FileResult{
 			ID:          entry.ID,

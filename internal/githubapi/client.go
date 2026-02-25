@@ -182,7 +182,41 @@ func (c *Client) CreateOrGetPullRequest(ctx context.Context, repo string, req Pu
 	if ferr != nil {
 		return PullRequest{}, fmt.Errorf("create PR conflict and fallback lookup failed: %w", errors.Join(err, ferr))
 	}
-	return found, nil
+	updated, uerr := c.UpdatePullRequest(ctx, repo, found.Number, req.Title, req.Body)
+	if uerr != nil {
+		return PullRequest{}, fmt.Errorf("reused PR %d but failed to refresh title/body: %w", found.Number, uerr)
+	}
+	if updated.URL == "" {
+		updated.URL = found.URL
+	}
+	if updated.Number == 0 {
+		updated.Number = found.Number
+	}
+	if updated.Title == "" {
+		updated.Title = found.Title
+	}
+	return updated, nil
+}
+
+// UpdatePullRequest updates a pull request title/body.
+func (c *Client) UpdatePullRequest(ctx context.Context, repo string, number int, title, body string) (PullRequest, error) {
+	payload := struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}{
+		Title: title,
+		Body:  body,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return PullRequest{}, err
+	}
+	var pr PullRequest
+	ep := fmt.Sprintf("/repos/%s/pulls/%d", repo, number)
+	if err := c.doJSON(ctx, http.MethodPatch, ep, bytes.NewReader(data), &pr); err != nil {
+		return PullRequest{}, err
+	}
+	return pr, nil
 }
 
 func (c *Client) resolveBranch(ctx context.Context, repo, branch string) (ResolvedRef, error) {

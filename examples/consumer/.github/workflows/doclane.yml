@@ -45,7 +45,8 @@ jobs:
 
       # Pin by immutable commit SHA in production.
       - name: Run Doclane
-        uses: bytemare/doclane@main
+        # Replace the placeholder SHA below with a reviewed Doclane action commit SHA.
+        uses: bytemare/doclane@0000000000000000000000000000000000000000
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           config-path: .github/.doclane.yml

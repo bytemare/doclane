@@ -6,6 +6,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/bytemare/doclane/internal/config"
 )
 
 // checkAllowlist validates the source repo against optional owner/repo glob patterns.
@@ -27,20 +29,23 @@ func checkAllowlist(repo string, allowlist []string) error {
 
 // safeTargetPath ensures Doclane only writes within the consumer repository root.
 func safeTargetPath(workdir, target string) (string, error) {
-	if filepath.IsAbs(target) {
-		return "", errors.New("target path must be relative")
-	}
-	clean := filepath.Clean(target)
-	if clean == "." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
-		return "", errors.New("target path escapes repository root")
+	joined, _, err := safeRepoRelativePath(workdir, target)
+	return joined, err
+}
+
+// safeRepoRelativePath validates a repo-relative path and returns absolute + normalized forms.
+func safeRepoRelativePath(workdir, relPath string) (string, string, error) {
+	clean, err := config.NormalizeRepoRelativePath(relPath)
+	if err != nil {
+		return "", "", err
 	}
 	joined := filepath.Join(workdir, clean)
 	rel, err := filepath.Rel(workdir, joined)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return "", errors.New("target path escapes repository root")
+		return "", "", errors.New("path escapes repository root")
 	}
-	return joined, nil
+	return joined, clean, nil
 }

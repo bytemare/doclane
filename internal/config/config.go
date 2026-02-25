@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -62,7 +63,9 @@ func Load(path string) (*Config, []byte, error) {
 		return nil, nil, err
 	}
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
 		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	cfg.applyDefaults()
@@ -112,16 +115,19 @@ func (c *Config) Validate() error {
 	if c.Policy.Path == "" {
 		return errors.New("policy.path cannot be empty")
 	}
-	if filepath.IsAbs(c.Policy.Path) {
-		return fmt.Errorf("policy.path must be repository-relative, got %q", c.Policy.Path)
+	cleanPolicyPath, err := NormalizeRepoRelativePath(c.Policy.Path)
+	if err != nil {
+		return fmt.Errorf("policy.path: %w", err)
 	}
+	c.Policy.Path = cleanPolicyPath
 	if len(c.Sync) == 0 {
 		return errors.New("sync must contain at least one entry")
 	}
 
 	targets := make(map[string]string, len(c.Sync))
 	ids := make(map[string]struct{}, len(c.Sync))
-	for i, entry := range c.Sync {
+	for i := range c.Sync {
+		entry := c.Sync[i]
 		if entry.ID == "" {
 			return fmt.Errorf("sync[%d].id is required", i)
 		}
@@ -135,16 +141,33 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(entry.Target) == "" {
 			return fmt.Errorf("sync[%d].target is required", i)
 		}
-		if filepath.IsAbs(entry.Target) {
-			return fmt.Errorf("sync[%d].target must be relative, got %q", i, entry.Target)
+		cleanTarget, err := NormalizeRepoRelativePath(entry.Target)
+		if err != nil {
+			return fmt.Errorf("sync[%d].target: %w", i, err)
 		}
-		if prev, ok := targets[entry.Target]; ok {
-			return fmt.Errorf("duplicate sync target %q (ids %q and %q)", entry.Target, prev, entry.ID)
+		c.Sync[i].Target = cleanTarget
+		if prev, ok := targets[cleanTarget]; ok {
+			return fmt.Errorf("duplicate sync target %q (ids %q and %q)", cleanTarget, prev, entry.ID)
 		}
-		targets[entry.Target] = entry.ID
+		targets[cleanTarget] = entry.ID
 		if entry.Template != nil && entry.Template.Vars == nil {
 			return fmt.Errorf("sync[%d].template.vars is required when template is set", i)
 		}
 	}
 	return nil
+}
+
+// NormalizeRepoRelativePath validates and canonicalizes a repository-relative path.
+func NormalizeRepoRelativePath(p string) (string, error) {
+	if filepath.IsAbs(p) {
+		return "", fmt.Errorf("must be repository-relative, got %q", p)
+	}
+	clean := filepath.Clean(p)
+	if clean == "." {
+		return "", errors.New("must not be current directory")
+	}
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("path escapes repository root")
+	}
+	return clean, nil
 }

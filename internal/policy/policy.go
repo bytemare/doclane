@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -50,7 +51,9 @@ type EnforceOptions struct {
 // Parse unmarshals and validates a policy file.
 func Parse(data []byte) (*Policy, error) {
 	var p Policy
-	if err := yaml.Unmarshal(data, &p); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&p); err != nil {
 		return nil, err
 	}
 	if p.Version == 0 {
@@ -72,18 +75,29 @@ func (p *Policy) Validate() error {
 	default:
 		return fmt.Errorf("unsupported constraints.template_mode %q", p.Constraints.TemplateMode)
 	}
-	for i, r := range p.Required {
+	for i := range p.Required {
+		r := p.Required[i]
 		if r.ID == "" && (r.Source == "" || r.Target == "") {
 			return fmt.Errorf("required[%d] must set id or both source+target", i)
 		}
+		if r.Target != "" {
+			cleanTarget, err := config.NormalizeRepoRelativePath(r.Target)
+			if err != nil {
+				return fmt.Errorf("required[%d].target: %w", i, err)
+			}
+			p.Required[i].Target = cleanTarget
+		}
 	}
-	for _, prefix := range p.Constraints.AllowedTargetPrefixes {
+	for i := range p.Constraints.AllowedTargetPrefixes {
+		prefix := p.Constraints.AllowedTargetPrefixes[i]
 		if prefix == "" {
 			return errors.New("constraints.allowed_target_prefixes cannot contain empty values")
 		}
-		if filepath.IsAbs(prefix) {
-			return fmt.Errorf("constraints.allowed_target_prefixes must be relative, got %q", prefix)
+		cleanPrefix, err := config.NormalizeRepoRelativePath(prefix)
+		if err != nil {
+			return fmt.Errorf("constraints.allowed_target_prefixes[%d]: %w", i, err)
 		}
+		p.Constraints.AllowedTargetPrefixes[i] = cleanPrefix
 	}
 	return nil
 }
@@ -119,15 +133,29 @@ func Enforce(cfg *config.Config, sel selector.Selector, p *Policy, opts EnforceO
 
 	if len(p.Constraints.AllowedTargetPrefixes) > 0 {
 		for _, entry := range cfg.Sync {
+			cleanTarget, err := config.NormalizeRepoRelativePath(entry.Target)
+			if err != nil {
+				if err := addViolation(fmt.Sprintf("sync target %q is invalid: %v", entry.Target, err)); err != nil {
+					return warnings, err
+				}
+				continue
+			}
 			ok := false
-			for _, prefix := range p.Constraints.AllowedTargetPrefixes {
-				if strings.HasPrefix(entry.Target, prefix) {
+			for _, rawPrefix := range p.Constraints.AllowedTargetPrefixes {
+				prefix, err := config.NormalizeRepoRelativePath(rawPrefix)
+				if err != nil {
+					if err := addViolation(fmt.Sprintf("policy target prefix %q is invalid: %v", rawPrefix, err)); err != nil {
+						return warnings, err
+					}
+					continue
+				}
+				if hasPathPrefix(cleanTarget, prefix) {
 					ok = true
 					break
 				}
 			}
 			if !ok {
-				if err := addViolation(fmt.Sprintf("sync target %q is not allowed by policy prefixes", entry.Target)); err != nil {
+				if err := addViolation(fmt.Sprintf("sync target %q is not allowed by policy prefixes", cleanTarget)); err != nil {
 					return warnings, err
 				}
 			}
@@ -174,6 +202,13 @@ func Enforce(cfg *config.Config, sel selector.Selector, p *Policy, opts EnforceO
 	}
 
 	return warnings, nil
+}
+
+func hasPathPrefix(target, prefix string) bool {
+	if target == prefix {
+		return true
+	}
+	return strings.HasPrefix(target, prefix+string(filepath.Separator))
 }
 
 func hasRequired(entries []config.SyncEntry, req RequiredRule) bool {

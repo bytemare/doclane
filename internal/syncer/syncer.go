@@ -68,6 +68,10 @@ type FileResult struct {
 	Changed     bool
 }
 
+var newSourceClient = func(token string) sourceClient {
+	return githubapi.New(token)
+}
+
 // Validate checks sync options for required values.
 func (o Options) Validate() error {
 	if o.ConfigPath == "" {
@@ -103,9 +107,21 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	workdir = filepath.Clean(workdir)
 
-	cfgPath := filepath.Join(workdir, opts.ConfigPath)
-	lockPath := filepath.Join(workdir, opts.LockfilePath)
-	manifestPath := filepath.Join(workdir, opts.ManifestPath)
+	cfgPath, cleanConfigPath, err := safeRepoRelativePath(workdir, opts.ConfigPath)
+	if err != nil {
+		return Result{}, fmt.Errorf("config-path: %w", err)
+	}
+	lockPath, cleanLockPath, err := safeRepoRelativePath(workdir, opts.LockfilePath)
+	if err != nil {
+		return Result{}, fmt.Errorf("lockfile-path: %w", err)
+	}
+	manifestPath, cleanManifestPath, err := safeRepoRelativePath(workdir, opts.ManifestPath)
+	if err != nil {
+		return Result{}, fmt.Errorf("manifest-path: %w", err)
+	}
+	opts.ConfigPath = cleanConfigPath
+	opts.LockfilePath = cleanLockPath
+	opts.ManifestPath = cleanManifestPath
 
 	cfg, _, err := config.Load(cfgPath)
 	if err != nil {
@@ -125,7 +141,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	var client sourceClient = githubapi.New(opts.GitHubToken)
+	client := newSourceClient(opts.GitHubToken)
 	resolved, err := client.ResolveSelector(ctx, cfg.Source.Repo, sel)
 	if err != nil {
 		return Result{}, fmt.Errorf("resolve selector %q: %w", sel.String(), err)
@@ -179,9 +195,6 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	manifestData := buildManifest(cfg.Source.Repo, resolved, polState, result.Files, result.Warnings)
 
 	if opts.DryRun {
-		if err := manifest.Write(manifestPath, manifestData); err != nil {
-			return Result{}, err
-		}
 		return result, nil
 	}
 

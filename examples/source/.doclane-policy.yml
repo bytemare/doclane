@@ -15,7 +15,6 @@ constraints:
 
 source_requirements:
   allow_selectors:
-    - latest
     - tag:*
     - commit:*
   require_signed_tags: true

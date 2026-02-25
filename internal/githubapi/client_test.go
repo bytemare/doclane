@@ -91,7 +91,7 @@ func TestResolveSelectorLatest(t *testing.T) {
 func TestCreateOrGetPullRequestFallsBackToExisting(t *testing.T) {
 	t.Parallel()
 
-	var postSeen, getSeen bool
+	var postSeen, getSeen, patchSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/consumer/pulls":
@@ -105,6 +105,20 @@ func TestCreateOrGetPullRequestFallsBackToExisting(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 42, "html_url": "https://github.com/acme/consumer/pull/42", "title": "existing"},
+			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/consumer/pulls/42":
+			patchSeen = true
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch body: %v", err)
+			}
+			if body["title"] != "test" || body["body"] != "body" {
+				t.Fatalf("unexpected patch body: %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"number":   42,
+				"html_url": "https://github.com/acme/consumer/pull/42",
+				"title":    "test",
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
@@ -122,10 +136,13 @@ func TestCreateOrGetPullRequestFallsBackToExisting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrGetPullRequest returned error: %v", err)
 	}
-	if !postSeen || !getSeen {
-		t.Fatalf("expected POST and fallback GET to be called")
+	if !postSeen || !getSeen || !patchSeen {
+		t.Fatalf("expected POST, fallback GET, and PATCH to be called")
 	}
 	if pr.Number != 42 || !strings.Contains(pr.URL, "/pull/42") {
 		t.Fatalf("unexpected PR returned: %+v", pr)
+	}
+	if pr.Title != "test" {
+		t.Fatalf("expected updated PR title, got %q", pr.Title)
 	}
 }

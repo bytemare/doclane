@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/bytemare/doclane/internal/config"
@@ -69,5 +70,44 @@ func TestPolicyEnforceWarnMode(t *testing.T) {
 	}
 	if len(warnings) < 2 {
 		t.Fatalf("expected warnings for prefix + selector, got %v", warnings)
+	}
+}
+
+func TestParseRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(strings.TrimSpace(`
+version: 1
+constraints:
+  allowed_target_prefixes: [docs/]
+  unknown_flag: true
+`))
+	if _, err := Parse(data); err == nil {
+		t.Fatal("expected unknown field parse error")
+	}
+}
+
+func TestPolicyEnforceRejectsNormalizedPrefixBypass(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Version: 1,
+		Policy:  config.PolicyConfig{Mode: "enforce"},
+		Sync: []config.SyncEntry{
+			{ID: "x", Source: "a", Target: "docs/../SECURITY.md"},
+		},
+	}
+	sel, _ := selector.Parse("commit:0123456789abcdef0123456789abcdef01234567")
+	p := &Policy{
+		Version: 1,
+		Constraints: Constraints{
+			AllowedTargetPrefixes: []string{"docs/"},
+		},
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("policy validate: %v", err)
+	}
+	if _, err := Enforce(cfg, sel, p, EnforceOptions{PolicyMode: "enforce"}); err == nil {
+		t.Fatal("expected normalized prefix bypass to be rejected")
 	}
 }

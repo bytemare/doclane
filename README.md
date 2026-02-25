@@ -26,6 +26,7 @@ See `examples/consumer/.github/workflows/doclane.yml`.
 - `latest` is supported only with explicit `allow_latest: true`
 - Doclane always resolves mutable selectors to an immutable commit SHA and records it in the lockfile
 - Signed tag enforcement is supported for tag selectors using GitHub API verification metadata
+- Signed tag enforcement applies to `tag:*` selectors (it does not make `latest`/branch tracking equivalent to tag pinning)
 - Commit signing is enforced by passing `git commit -S`; the workflow must configure SSH or GPG signing before running the action
 - Consumers should pin `uses: bytemare/doclane@<commit-sha>` to an immutable commit SHA
 - Full immutability also depends on Doclane pinning its nested actions by SHA in `action.yml` (the repository does this)
@@ -33,8 +34,13 @@ See `examples/consumer/.github/workflows/doclane.yml`.
 ## Current Implementation Notes
 
 - The action is Go-based and currently builds the binary at runtime in the composite action
+- The action uses a pinned internal Go toolchain version in `action.yml` (no user-configurable Go version input)
 - Releases are source/tag-focused and publish source-level release metadata rather than standalone CLI binaries
 - Consumers should pin the Doclane action by commit SHA
+
+## Dry Run
+
+- `dry-run` resolves selectors, fetches/renders content, and computes diffs/hashes without writing target files, lockfile, or manifest
 
 ## Release Model
 
