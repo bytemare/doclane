@@ -42,6 +42,12 @@ See `examples/consumer/.github/workflows/doclane.yml`.
 
 - `dry-run` resolves selectors, fetches/renders content, and computes diffs/hashes without writing target files, lockfile, or manifest
 
+## Fuzzing
+
+- Run fuzzers locally with `make -C .github fuzz`
+- Override time per target with `FUZZTIME`, for example: `FUZZTIME=30s make -C .github fuzz`
+- Fuzz seeds/crashers use Go's package-local corpus layout under `internal/.../testdata/fuzz/<FuzzName>/`
+
 ## Release Model
 
 - Doclane is currently distributed for use as a GitHub Action, not as a standalone CLI binary
