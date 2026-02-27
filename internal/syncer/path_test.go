@@ -41,3 +41,20 @@ func TestSafeRepoRelativePath(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckAllowlist(t *testing.T) {
+	t.Parallel()
+
+	if err := checkAllowlist("acme/shared", nil); err != nil {
+		t.Fatalf("unexpected error with empty allowlist: %v", err)
+	}
+	if err := checkAllowlist("acme/shared", []string{"acme/*"}); err != nil {
+		t.Fatalf("unexpected allowlist miss: %v", err)
+	}
+	if err := checkAllowlist("acme/shared", []string{"other/*"}); err == nil {
+		t.Fatal("expected source repo allowlist rejection")
+	}
+	if err := checkAllowlist("acme/shared", []string{"["}); err == nil {
+		t.Fatal("expected invalid pattern error")
+	}
+}

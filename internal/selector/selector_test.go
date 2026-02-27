@@ -43,11 +43,30 @@ func TestParseSelector(t *testing.T) {
 func TestMatchesPolicyPattern(t *testing.T) {
 	t.Parallel()
 
-	sel, _ := Parse("branch:main")
-	if !MatchesPolicyPattern(sel, "branch:*") {
-		t.Fatal("expected branch selector to match branch:*")
+	tests := []struct {
+		selector string
+		pattern  string
+		want     bool
+	}{
+		{selector: "latest", pattern: "latest", want: true},
+		{selector: "branch:main", pattern: "branch:*", want: true},
+		{selector: "branch:main", pattern: "branch:main", want: true},
+		{selector: "branch:main", pattern: "branch:dev", want: false},
+		{selector: "branch:main", pattern: "tag:*", want: false},
+		{selector: "tag:v1.2.3", pattern: "tag:*", want: true},
+		{selector: "commit:0123456789abcdef0123456789abcdef01234567", pattern: "commit:*", want: true},
+		{selector: "commit:0123456789abcdef0123456789abcdef01234567", pattern: "latest", want: false},
+		{selector: "latest", pattern: "", want: false},
+		{selector: "latest", pattern: " ", want: false},
 	}
-	if MatchesPolicyPattern(sel, "tag:*") {
-		t.Fatal("did not expect branch selector to match tag:*")
+
+	for _, tt := range tests {
+		sel, err := Parse(tt.selector)
+		if err != nil {
+			t.Fatalf("Parse(%q) returned error: %v", tt.selector, err)
+		}
+		if got := MatchesPolicyPattern(sel, tt.pattern); got != tt.want {
+			t.Fatalf("MatchesPolicyPattern(%q, %q)=%t want %t", tt.selector, tt.pattern, got, tt.want)
+		}
 	}
 }

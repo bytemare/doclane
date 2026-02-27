@@ -6,6 +6,11 @@ import (
 	"github.com/bytemare/doclane/internal/cli"
 )
 
+var (
+	runCLI = cli.Run
+	exit   = os.Exit
+)
+
 func main() {
-	os.Exit(cli.Run(os.Args[1:]))
+	exit(runCLI(os.Args[1:]))
 }

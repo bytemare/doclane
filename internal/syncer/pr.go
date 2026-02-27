@@ -12,9 +12,33 @@ import (
 	"github.com/bytemare/doclane/internal/gitops"
 )
 
+type gitClient interface {
+	EnsureRepo() error
+	SetUser(name, email string) error
+	CurrentBranch() (string, error)
+	CheckoutBranch(branch string) error
+	Add(paths ...string) error
+	Commit(message string, signoff, sign bool) error
+	PushSetUpstream(branch string) error
+	OriginRepo() (string, error)
+}
+
+type pullRequestClient interface {
+	CreateOrGetPullRequest(ctx context.Context, repo string, req githubapi.PullRequestRequest) (githubapi.PullRequest, error)
+}
+
+var (
+	newGitRunner = func(dir string) gitClient {
+		return gitops.Runner{Dir: dir}
+	}
+	newPRClient = func(token string) pullRequestClient {
+		return githubapi.New(token)
+	}
+)
+
 // createPullRequestFlow commits and pushes changes, then creates or reuses a PR.
 func createPullRequestFlow(ctx context.Context, opts Options, cfg *config.Config, resolved githubapi.ResolvedRef, files []FileResult, workdir string) (string, error) {
-	git := gitops.Runner{Dir: workdir}
+	git := newGitRunner(workdir)
 	if err := git.EnsureRepo(); err != nil {
 		return "", fmt.Errorf("create-pr requires a git repository checkout: %w", err)
 	}
@@ -77,7 +101,7 @@ func createPullRequestFlow(ctx context.Context, opts Options, cfg *config.Config
 		}
 	}
 
-	client := githubapi.New(opts.GitHubToken)
+	client := newPRClient(opts.GitHubToken)
 	prTitle := fmt.Sprintf("%s from %s@%s", strings.TrimSpace(opts.PRTitlePrefix), cfg.Source.Repo, shortSHA)
 	prBody := buildPRBody(cfg.Source.Repo, resolved, files)
 	pr, err := client.CreateOrGetPullRequest(ctx, consumerRepo, githubapi.PullRequestRequest{
