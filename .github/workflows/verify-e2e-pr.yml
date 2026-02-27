@@ -12,8 +12,7 @@ on:
       - examples/**
       - .github/workflows/**
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: verify-e2e-${{ github.workflow }}-${{ github.ref }}
@@ -23,6 +22,8 @@ jobs:
   verify-readonly-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     env:
       VERIFY_SOURCE_REPO: bytemare/.github
       VERIFY_SOURCE_SHA: 63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7
