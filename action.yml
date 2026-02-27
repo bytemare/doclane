@@ -36,7 +36,7 @@ inputs:
   pr-title-prefix:
     description: PR title prefix.
     required: false
-    default: chore(doclane): sync shared docs
+    default: "chore(doclane): sync shared docs"
   commit-signoff:
     description: Add DCO sign-off to generated commits.
     required: false
