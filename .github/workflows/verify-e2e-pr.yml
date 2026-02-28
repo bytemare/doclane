@@ -1,12 +1,13 @@
+---
 name: Verify E2E (PR)
 
-on:
+"on":
   pull_request:
     paths:
       - action.yml
       - go.mod
       - go.sum
-      - .golangci.yml
+      - .github/.golangci.yml
       - cmd/**
       - internal/**
       - examples/**
@@ -25,18 +26,24 @@ jobs:
     permissions:
       contents: read
     env:
-      VERIFY_SOURCE_REPO: bytemare/.github
-      VERIFY_SOURCE_SHA: 63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7
-      VERIFY_SOURCE_SELECTOR: commit:63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7
-      VERIFY_SOURCE_FILE: README.md
-      VERIFY_TARGET_FILE: docs/upstream/bytemare-github-README.md
+      VERIFY_SOURCE_REPO: ${{ github.repository }}
+      VERIFY_SOURCE_SHA: ${{ github.sha }}
+      VERIFY_SOURCE_SELECTOR: commit:${{ github.sha }}
+      VERIFY_SOURCE_FILE: examples/source/open-source/CODE_OF_CONDUCT.md
+      VERIFY_TARGET_FILE: docs/CODE_OF_CONDUCT.md
+      VERIFY_TEMPLATE_SINGLE_SOURCE: >-
+        examples/source/templates/REPO_OVERVIEW.md.tmpl
+      VERIFY_TEMPLATE_SINGLE_TARGET: docs/REPO_OVERVIEW.md
+      VERIFY_TEMPLATE_BLOCK_SOURCE: >-
+        examples/source/templates/SECURITY_BLOCK.md.tmpl
+      VERIFY_TEMPLATE_BLOCK_TARGET: docs/SECURITY_BLOCK.md
       VERIFY_CONFIG_PATH: .github/.doclane.yml
       VERIFY_LOCKFILE_PATH: .github/.doclane.lock.yml
       VERIFY_MANIFEST_PATH: doclane-sync-manifest.json
     steps:
       - name: Checkout action source
         # Pin to immutable SHAs in production repositories.
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           path: action-src
           fetch-depth: 1
@@ -46,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .github docs/upstream .e2e
+          mkdir -p .github docs .e2e
           cat > "${VERIFY_CONFIG_PATH}" <<EOF
           version: 1
 
@@ -61,9 +68,24 @@ jobs:
             path: .doclane-policy.yml
 
           sync:
-            - id: upstream_readme
+            - id: code_of_conduct
               source: ${VERIFY_SOURCE_FILE}
               target: ${VERIFY_TARGET_FILE}
+            - id: repo_overview
+              source: ${VERIFY_TEMPLATE_SINGLE_SOURCE}
+              target: ${VERIFY_TEMPLATE_SINGLE_TARGET}
+              template:
+                vars:
+                  repo_name: doclane
+            - id: security_block
+              source: ${VERIFY_TEMPLATE_BLOCK_SOURCE}
+              target: ${VERIFY_TEMPLATE_BLOCK_TARGET}
+              template:
+                vars:
+                  security_block: |
+                    Please report vulnerabilities to security@example.com.
+
+                    We will acknowledge receipt within 72 hours.
           EOF
 
       - name: Run Doclane (first pass)
@@ -74,7 +96,7 @@ jobs:
           config-path: ${{ env.VERIFY_CONFIG_PATH }}
           lockfile-path: ${{ env.VERIFY_LOCKFILE_PATH }}
           manifest-path: ${{ env.VERIFY_MANIFEST_PATH }}
-          source-repo-allowlist: bytemare/*
+          source-repo-allowlist: ${{ github.repository_owner }}/*
           create-pr: "false"
           commit-signoff: "false"
           commit-sign: "false"
@@ -84,36 +106,78 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${{ steps.first_run.outputs.noop }}" == "false" ]]
-          [[ "${{ steps.first_run.outputs.resolved-sha }}" == "${VERIFY_SOURCE_SHA}" ]]
-          [[ -z "${{ steps.first_run.outputs.pr-url }}" ]]
+          first_noop="${{ steps.first_run.outputs.noop }}"
+          first_sha="${{ steps.first_run.outputs.resolved-sha }}"
+          first_pr="${{ steps.first_run.outputs.pr-url }}"
 
-          test -s "${VERIFY_TARGET_FILE}"
-          test -s "${VERIFY_LOCKFILE_PATH}"
+          [[ "${first_noop}" == "false" ]]
+          [[ "${first_sha}" == "${VERIFY_SOURCE_SHA}" ]]
+          [[ -z "${first_pr}" ]]
+
+          lock="${VERIFY_LOCKFILE_PATH}"
+          target="${VERIFY_TARGET_FILE}"
+          single_target="${VERIFY_TEMPLATE_SINGLE_TARGET}"
+          block_target="${VERIFY_TEMPLATE_BLOCK_TARGET}"
+
+          test -s "${target}"
+          test -s "${single_target}"
+          test -s "${block_target}"
+          test -s "${lock}"
           test -s "${VERIFY_MANIFEST_PATH}"
 
-          grep -Eq '^[[:space:]]+source_repo: bytemare/.github$' "${VERIFY_LOCKFILE_PATH}"
-          grep -Eq "^[[:space:]]+selector: ${VERIFY_SOURCE_SELECTOR}$" "${VERIFY_LOCKFILE_PATH}"
-          grep -Eq "^[[:space:]]+commit_sha: ${VERIFY_SOURCE_SHA}$" "${VERIFY_LOCKFILE_PATH}"
-          grep -Eq '^[[:space:]]+- id: upstream_readme$' "${VERIFY_LOCKFILE_PATH}"
-          grep -Eq "^[[:space:]]+target: ${VERIFY_TARGET_FILE}$" "${VERIFY_LOCKFILE_PATH}"
+          grep -Eq "^[[:space:]]+source_repo: ${VERIFY_SOURCE_REPO}$" "${lock}"
+          grep -Eq "^[[:space:]]+selector: ${VERIFY_SOURCE_SELECTOR}$" "${lock}"
+          grep -Eq "^[[:space:]]+commit_sha: ${VERIFY_SOURCE_SHA}$" "${lock}"
+          grep -Eq '^[[:space:]]+- id: code_of_conduct$' "${lock}"
+          grep -Eq '^[[:space:]]+- id: repo_overview$' "${lock}"
+          grep -Eq '^[[:space:]]+- id: security_block$' "${lock}"
+          grep -Eq "^[[:space:]]+target: ${target}$" "${lock}"
+          grep -Eq "^[[:space:]]+target: ${single_target}$" "${lock}"
+          grep -Eq "^[[:space:]]+target: ${block_target}$" "${lock}"
 
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
+          src_repo = os.environ["VERIFY_SOURCE_REPO"]
+          src_selector = os.environ["VERIFY_SOURCE_SELECTOR"]
+          src_sha = os.environ["VERIFY_SOURCE_SHA"]
+          target = os.environ["VERIFY_TARGET_FILE"]
+          single_target = os.environ["VERIFY_TEMPLATE_SINGLE_TARGET"]
+          block_target = os.environ["VERIFY_TEMPLATE_BLOCK_TARGET"]
+
           manifest = json.loads(Path("doclane-sync-manifest.json").read_text())
-          assert manifest["source_repo"] == "bytemare/.github", manifest
-          assert manifest["selector"] == "commit:63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7", manifest
-          assert manifest["commit_sha"] == "63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7", manifest
+          assert manifest["source_repo"] == src_repo, manifest
+          assert manifest["selector"] == src_selector, manifest
+          assert manifest["commit_sha"] == src_sha, manifest
+
           files = manifest.get("files", [])
           assert files, manifest
-          matches = [f for f in files if f.get("target") == "docs/upstream/bytemare-github-README.md"]
-          assert matches, files
-          assert matches[0]["changed"] is True, matches[0]
+          by_target = {f.get("target"): f for f in files}
+          required_targets = [target, single_target, block_target]
+          for target in required_targets:
+              assert target in by_target, by_target
+              assert by_target[target]["changed"] is True, by_target[target]
+
+          assert by_target[target]["templated"] is False
+          assert by_target[single_target]["templated"] is True
+          assert by_target[block_target]["templated"] is True
+
+          single = Path(single_target).read_text()
+          assert "Repository: doclane" in single, single
+
+          block = Path(block_target).read_text()
+          expected_block = (
+              "Please report vulnerabilities to security@example.com.\n\n"
+              "We will acknowledge receipt within 72 hours."
+          )
+          assert expected_block in block, block
           PY
 
           cp "${VERIFY_TARGET_FILE}" .e2e/first-target.txt
+          cp "${VERIFY_TEMPLATE_SINGLE_TARGET}" .e2e/first-template-single.txt
+          cp "${VERIFY_TEMPLATE_BLOCK_TARGET}" .e2e/first-template-block.txt
           cp "${VERIFY_LOCKFILE_PATH}" .e2e/first-lock.yml
           cp "${VERIFY_MANIFEST_PATH}" .e2e/first-manifest.json
 
@@ -125,7 +189,7 @@ jobs:
           config-path: ${{ env.VERIFY_CONFIG_PATH }}
           lockfile-path: ${{ env.VERIFY_LOCKFILE_PATH }}
           manifest-path: ${{ env.VERIFY_MANIFEST_PATH }}
-          source-repo-allowlist: bytemare/*
+          source-repo-allowlist: ${{ github.repository_owner }}/*
           create-pr: "false"
           commit-signoff: "false"
           commit-sign: "false"
@@ -135,28 +199,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${{ steps.second_run.outputs.noop }}" == "true" ]]
-          [[ "${{ steps.second_run.outputs.resolved-sha }}" == "${VERIFY_SOURCE_SHA}" ]]
-          [[ -z "${{ steps.second_run.outputs.pr-url }}" ]]
+          second_noop="${{ steps.second_run.outputs.noop }}"
+          second_sha="${{ steps.second_run.outputs.resolved-sha }}"
+          second_pr="${{ steps.second_run.outputs.pr-url }}"
+
+          [[ "${second_noop}" == "true" ]]
+          [[ "${second_sha}" == "${VERIFY_SOURCE_SHA}" ]]
+          [[ -z "${second_pr}" ]]
 
           cmp -s .e2e/first-target.txt "${VERIFY_TARGET_FILE}"
+          cmp -s .e2e/first-template-single.txt \
+            "${VERIFY_TEMPLATE_SINGLE_TARGET}"
+          cmp -s .e2e/first-template-block.txt \
+            "${VERIFY_TEMPLATE_BLOCK_TARGET}"
           cmp -s .e2e/first-lock.yml "${VERIFY_LOCKFILE_PATH}"
 
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           first = json.loads(Path(".e2e/first-manifest.json").read_text())
           second = json.loads(Path("doclane-sync-manifest.json").read_text())
-          assert first["commit_sha"] == second["commit_sha"] == "63c750e6038a9b119dd91e4f4c5f1c9bc414d0a7"
+          source_sha = os.environ["VERIFY_SOURCE_SHA"]
+          assert first["commit_sha"] == second["commit_sha"] == source_sha
           assert second["files"], second
-          assert all(f.get("changed") is False for f in second["files"]), second["files"]
+          all_unchanged = all(
+              f.get("changed") is False for f in second["files"]
+          )
+          assert all_unchanged, second["files"]
           PY
 
       - name: Upload E2E artifacts on failure
         if: failure()
-        # Pin to immutable SHAs in production repositories.
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: verify-e2e-pr-artifacts
           if-no-files-found: ignore
@@ -164,5 +240,5 @@ jobs:
             .github/.doclane.yml
             .github/.doclane.lock.yml
             doclane-sync-manifest.json
-            docs/upstream/**
+            docs/**
             .e2e/**

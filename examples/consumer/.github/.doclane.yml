@@ -1,3 +1,12 @@
+# SPDX-License-Identifier: MIT
+#
+# Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree or at
+# https://spdx.org/licenses/MIT.html
+
+---
 version: 1
 
 source:
@@ -15,10 +24,19 @@ sync:
     source: open-source/CODE_OF_CONDUCT.md
     target: docs/CODE_OF_CONDUCT.md
 
-  - id: security_policy
-    source: templates/SECURITY.md.tmpl
-    target: SECURITY.md
+  - id: repo_overview
+    source: templates/REPO_OVERVIEW.md.tmpl
+    target: docs/REPO_OVERVIEW.md
     template:
       vars:
-        project_name: Consumer Repo
-        security_email: security@example.com
+        repo_name: consumer-repo
+
+  - id: security_block
+    source: templates/SECURITY_BLOCK.md.tmpl
+    target: docs/SECURITY_BLOCK.md
+    template:
+      vars:
+        security_block: |
+          Please report vulnerabilities to security@example.com.
+
+          We will acknowledge receipt within 72 hours.

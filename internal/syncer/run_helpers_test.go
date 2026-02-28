@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: MIT
+//
+// Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree or at
+// https://spdx.org/licenses/MIT.html
+
 package syncer
 
 import (
@@ -100,6 +108,84 @@ func TestStageFilesTemplateAndUnchanged(t *testing.T) {
 	}
 }
 
+func TestStageFilesTemplateSingleWordAndBlock(t *testing.T) {
+	t.Parallel()
+
+	workdir := t.TempDir()
+	cfg := &config.Config{
+		Source: config.SourceConfig{Repo: "acme/shared"},
+		Sync: []config.SyncEntry{
+			{
+				ID:     "repo_overview",
+				Source: "templates/REPO_OVERVIEW.md.tmpl",
+				Target: "docs/REPO_OVERVIEW.md",
+				Template: &config.TemplateSpec{
+					Vars: map[string]string{
+						"repo_name": "doclane",
+					},
+				},
+			},
+			{
+				ID:     "security_block",
+				Source: "templates/SECURITY_BLOCK.md.tmpl",
+				Target: "docs/SECURITY_BLOCK.md",
+				Template: &config.TemplateSpec{
+					Vars: map[string]string{
+						"security_block": "Report to security@example.com.\n\nSLA: 72 hours.",
+					},
+				},
+			},
+		},
+	}
+	staged, results, err := stageFiles(context.Background(), fakeFileFetcher{
+		files: map[string][]byte{
+			"templates/REPO_OVERVIEW.md.tmpl": []byte(
+				"# Shared Repository Overview\n\nRepository: {{ shared.repo_name }}\n",
+			),
+			"templates/SECURITY_BLOCK.md.tmpl": []byte(
+				"# Security Reporting\n\n{{ shared.security_block }}\n",
+			),
+		},
+	}, cfg, "deadbeef", workdir, true)
+	if err != nil {
+		t.Fatalf("stageFiles returned error: %v", err)
+	}
+	if len(staged) != 2 || len(results) != 2 {
+		t.Fatalf(
+			"unexpected staged/results lengths: %d/%d",
+			len(staged),
+			len(results),
+		)
+	}
+
+	want := map[string]string{
+		"repo_overview": "# Shared Repository Overview\n\nRepository: doclane\n",
+		"security_block": "# Security Reporting\n\n" +
+			"Report to security@example.com.\n\nSLA: 72 hours.\n",
+	}
+
+	for _, sf := range staged {
+		got := string(sf.rendered)
+		if got != want[sf.entry.ID] {
+			t.Fatalf("unexpected rendered output for %s:\n%s", sf.entry.ID, got)
+		}
+		if sf.renderedSHA == "" || sf.upstreamSHA == "" {
+			t.Fatalf("expected non-empty hashes for %s: %+v", sf.entry.ID, sf)
+		}
+		if !sf.changed {
+			t.Fatalf("expected changed=true for new target file %s", sf.entry.Target)
+		}
+	}
+	for _, r := range results {
+		if !r.Templated {
+			t.Fatalf("expected templated=true for %s", r.ID)
+		}
+		if !r.Changed {
+			t.Fatalf("expected changed=true for %s", r.ID)
+		}
+	}
+}
+
 func TestStageFilesErrors(t *testing.T) {
 	t.Parallel()
 
@@ -118,6 +204,13 @@ func TestStageFilesErrors(t *testing.T) {
 		files: map[string][]byte{"README.md": []byte("Hello")},
 	}, cfg, "deadbeef", t.TempDir(), true); err == nil || !strings.Contains(err.Error(), "render template") {
 		t.Fatalf("expected template rendering error, got %v", err)
+	}
+
+	cfg.Sync[0].Template = &config.TemplateSpec{Vars: map[string]string{}}
+	if _, _, err := stageFiles(context.Background(), fakeFileFetcher{
+		files: map[string][]byte{"README.md": []byte("Hello {{ shared.name }}")},
+	}, cfg, "deadbeef", t.TempDir(), true); err == nil || !strings.Contains(err.Error(), "render template") {
+		t.Fatalf("expected missing template var error, got %v", err)
 	}
 }
 

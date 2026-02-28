@@ -21,6 +21,35 @@ Doclane syncs governed shared documentation files from a central GitHub reposito
 
 See `examples/consumer/.github/workflows/doclane.yml`.
 
+## Templating Examples
+
+Doclane template placeholders use `{{ shared.<name> }}`.
+
+Single-word substitution (for example, a repository name):
+
+```yaml
+- id: repo_overview
+  source: templates/REPO_OVERVIEW.md.tmpl
+  target: docs/REPO_OVERVIEW.md
+  template:
+    vars:
+      repo_name: consumer-repo
+```
+
+Multi-line block substitution:
+
+```yaml
+- id: security_block
+  source: templates/SECURITY_BLOCK.md.tmpl
+  target: docs/SECURITY_BLOCK.md
+  template:
+    vars:
+      security_block: |
+        Please report vulnerabilities to security@example.com.
+
+        We will acknowledge receipt within 72 hours.
+```
+
 ## Security Notes
 
 - `latest` is supported only with explicit `allow_latest: true`
