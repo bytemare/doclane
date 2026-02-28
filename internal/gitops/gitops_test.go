@@ -77,6 +77,7 @@ func TestParseGitHubRepo(t *testing.T) {
 func TestRunnerBasicLifecycle(t *testing.T) {
 	t.Parallel()
 
+	const testBranch = "chore/doclane-sync/test"
 	dir := t.TempDir()
 	r := Runner{Dir: dir}
 
@@ -117,21 +118,21 @@ func TestRunnerBasicLifecycle(t *testing.T) {
 		t.Fatalf("unexpected branch: %q", branch)
 	}
 
-	if err := r.CheckoutBranch("chore/doclane-sync/test"); err != nil {
+	if err := r.CheckoutBranch(testBranch); err != nil {
 		t.Fatalf("CheckoutBranch returned error: %v", err)
 	}
 	branch, err = r.CurrentBranch()
 	if err != nil {
 		t.Fatalf("CurrentBranch returned error: %v", err)
 	}
-	if branch != "chore/doclane-sync/test" {
+	if branch != testBranch {
 		t.Fatalf("unexpected checked-out branch: %q", branch)
 	}
 
 	remote := filepath.Join(t.TempDir(), "origin.git")
 	runGit(t, dir, "init", "--bare", remote)
 	runGit(t, dir, "remote", "add", "origin", remote)
-	if err := r.PushSetUpstream("chore/doclane-sync/test"); err != nil {
+	if err := r.PushSetUpstream(testBranch); err != nil {
 		t.Fatalf("PushSetUpstream returned error: %v", err)
 	}
 }

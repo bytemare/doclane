@@ -33,8 +33,8 @@ license:
 .PHONY: lint
 lint: fmt license
 	@echo "Linting ..."
-	@if golangci-lint config verify -v --config=.golangci.yml; then echo "Config OK"; else return 1; fi;
-	@if golangci-lint run --config=.golangci.yml ../...; then echo "Linting OK"; else return 1; fi;
+	@if golangci-lint config verify -v --config=.github/.golangci.yml; then echo "Config OK"; else return 1; fi;
+	@if golangci-lint run --config=.github/.golangci.yml ../...; then echo "Linting OK"; else return 1; fi;
 
 .PHONY: vulncheck
 vulncheck:

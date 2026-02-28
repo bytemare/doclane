@@ -156,9 +156,11 @@ jobs:
           assert files, manifest
           by_target = {f.get("target"): f for f in files}
           required_targets = [target, single_target, block_target]
-          for target in required_targets:
-              assert target in by_target, by_target
-              assert by_target[target]["changed"] is True, by_target[target]
+          for current_target in required_targets:
+              assert current_target in by_target, by_target
+              assert by_target[current_target]["changed"] is True, (
+                  by_target[current_target]
+              )
 
           assert by_target[target]["templated"] is False
           assert by_target[single_target]["templated"] is True
