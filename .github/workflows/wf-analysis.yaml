@@ -104,7 +104,9 @@ jobs:
       # Shared coverage generation (one-time, consumed by SonarQube and Codecov)
       coverage-enabled: true
       coverage-go-enabled: true
-      coverage-go-command: "make -C .github cover"
+      coverage-go-command: >-
+        make -C .github cover &&
+        test -s .github/coverage.out
       coverage-go-report-path: ".github/coverage.out"
       # Govulncheck
       govulncheck: true
