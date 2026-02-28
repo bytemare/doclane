@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: MIT
+#
+# Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree or at
+# https://spdx.org/licenses/MIT.html
+
+---
+version: 1
+
+required:
+  - id: code_of_conduct
+    source: open-source/CODE_OF_CONDUCT.md
+    target: docs/CODE_OF_CONDUCT.md
+  - id: repo_overview
+    source: templates/REPO_OVERVIEW.md.tmpl
+    target: docs/REPO_OVERVIEW.md
+  - id: security_block
+    source: templates/SECURITY_BLOCK.md.tmpl
+    target: docs/SECURITY_BLOCK.md
+
+constraints:
+  allowed_target_prefixes:
+    - docs/
+    - .github/
+  require_dco: true
+  require_commit_signing: true
+  template_mode: simple_placeholders_only
+
+source_requirements:
+  allow_selectors:
+    - tag:*
+    - commit:*
+  require_signed_tags: true

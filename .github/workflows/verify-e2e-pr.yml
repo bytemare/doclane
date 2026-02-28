@@ -1,0 +1,246 @@
+---
+name: Verify E2E (PR)
+
+"on":
+  pull_request:
+    paths:
+      - action.yml
+      - go.mod
+      - go.sum
+      - .github/.golangci.yml
+      - cmd/**
+      - internal/**
+      - examples/**
+      - .github/workflows/**
+
+permissions: {}
+
+concurrency:
+  group: verify-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-readonly-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      VERIFY_SOURCE_REPO: ${{ github.repository }}
+      VERIFY_SOURCE_SHA: ${{ github.sha }}
+      VERIFY_SOURCE_SELECTOR: commit:${{ github.sha }}
+      VERIFY_SOURCE_FILE: examples/source/open-source/CODE_OF_CONDUCT.md
+      VERIFY_TARGET_FILE: docs/CODE_OF_CONDUCT.md
+      VERIFY_TEMPLATE_SINGLE_SOURCE: >-
+        examples/source/templates/REPO_OVERVIEW.md.tmpl
+      VERIFY_TEMPLATE_SINGLE_TARGET: docs/REPO_OVERVIEW.md
+      VERIFY_TEMPLATE_BLOCK_SOURCE: >-
+        examples/source/templates/SECURITY_BLOCK.md.tmpl
+      VERIFY_TEMPLATE_BLOCK_TARGET: docs/SECURITY_BLOCK.md
+      VERIFY_CONFIG_PATH: .github/.doclane.yml
+      VERIFY_LOCKFILE_PATH: .github/.doclane.lock.yml
+      VERIFY_MANIFEST_PATH: doclane-sync-manifest.json
+    steps:
+      - name: Checkout action source
+        # Pin to immutable SHAs in production repositories.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          path: action-src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare consumer fixture repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github docs .e2e
+          cat > "${VERIFY_CONFIG_PATH}" <<EOF
+          version: 1
+
+          source:
+            repo: ${VERIFY_SOURCE_REPO}
+            selector: ${VERIFY_SOURCE_SELECTOR}
+            allow_latest: false
+            enforce_signed_tags: false
+
+          policy:
+            mode: warn
+            path: .doclane-policy.yml
+
+          sync:
+            - id: code_of_conduct
+              source: ${VERIFY_SOURCE_FILE}
+              target: ${VERIFY_TARGET_FILE}
+            - id: repo_overview
+              source: ${VERIFY_TEMPLATE_SINGLE_SOURCE}
+              target: ${VERIFY_TEMPLATE_SINGLE_TARGET}
+              template:
+                vars:
+                  repo_name: doclane
+            - id: security_block
+              source: ${VERIFY_TEMPLATE_BLOCK_SOURCE}
+              target: ${VERIFY_TEMPLATE_BLOCK_TARGET}
+              template:
+                vars:
+                  security_block: |
+                    Please report vulnerabilities to security@example.com.
+
+                    We will acknowledge receipt within 72 hours.
+          EOF
+
+      - name: Run Doclane (first pass)
+        id: first_run
+        uses: ./action-src
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          config-path: ${{ env.VERIFY_CONFIG_PATH }}
+          lockfile-path: ${{ env.VERIFY_LOCKFILE_PATH }}
+          manifest-path: ${{ env.VERIFY_MANIFEST_PATH }}
+          source-repo-allowlist: ${{ github.repository_owner }}/*
+          create-pr: "false"
+          commit-signoff: "false"
+          commit-sign: "false"
+          template-strict: "true"
+
+      - name: Assert first-pass outputs and artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          first_noop="${{ steps.first_run.outputs.noop }}"
+          first_sha="${{ steps.first_run.outputs.resolved-sha }}"
+          first_pr="${{ steps.first_run.outputs.pr-url }}"
+
+          [[ "${first_noop}" == "false" ]]
+          [[ "${first_sha}" == "${VERIFY_SOURCE_SHA}" ]]
+          [[ -z "${first_pr}" ]]
+
+          lock="${VERIFY_LOCKFILE_PATH}"
+          target="${VERIFY_TARGET_FILE}"
+          single_target="${VERIFY_TEMPLATE_SINGLE_TARGET}"
+          block_target="${VERIFY_TEMPLATE_BLOCK_TARGET}"
+
+          test -s "${target}"
+          test -s "${single_target}"
+          test -s "${block_target}"
+          test -s "${lock}"
+          test -s "${VERIFY_MANIFEST_PATH}"
+
+          grep -Eq "^[[:space:]]+source_repo: ${VERIFY_SOURCE_REPO}$" "${lock}"
+          grep -Eq "^[[:space:]]+selector: ${VERIFY_SOURCE_SELECTOR}$" "${lock}"
+          grep -Eq "^[[:space:]]+commit_sha: ${VERIFY_SOURCE_SHA}$" "${lock}"
+          grep -Eq '^[[:space:]]+- id: code_of_conduct$' "${lock}"
+          grep -Eq '^[[:space:]]+- id: repo_overview$' "${lock}"
+          grep -Eq '^[[:space:]]+- id: security_block$' "${lock}"
+          grep -Eq "^[[:space:]]+target: ${target}$" "${lock}"
+          grep -Eq "^[[:space:]]+target: ${single_target}$" "${lock}"
+          grep -Eq "^[[:space:]]+target: ${block_target}$" "${lock}"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          src_repo = os.environ["VERIFY_SOURCE_REPO"]
+          src_selector = os.environ["VERIFY_SOURCE_SELECTOR"]
+          src_sha = os.environ["VERIFY_SOURCE_SHA"]
+          target = os.environ["VERIFY_TARGET_FILE"]
+          single_target = os.environ["VERIFY_TEMPLATE_SINGLE_TARGET"]
+          block_target = os.environ["VERIFY_TEMPLATE_BLOCK_TARGET"]
+
+          manifest = json.loads(Path("doclane-sync-manifest.json").read_text())
+          assert manifest["source_repo"] == src_repo, manifest
+          assert manifest["selector"] == src_selector, manifest
+          assert manifest["commit_sha"] == src_sha, manifest
+
+          files = manifest.get("files", [])
+          assert files, manifest
+          by_target = {f.get("target"): f for f in files}
+          required_targets = [target, single_target, block_target]
+          for current_target in required_targets:
+              assert current_target in by_target, by_target
+              assert by_target[current_target]["changed"] is True, (
+                  by_target[current_target]
+              )
+
+          assert by_target[target]["templated"] is False
+          assert by_target[single_target]["templated"] is True
+          assert by_target[block_target]["templated"] is True
+
+          single = Path(single_target).read_text()
+          assert "Repository: doclane" in single, single
+
+          block = Path(block_target).read_text()
+          expected_block = (
+              "Please report vulnerabilities to security@example.com.\n\n"
+              "We will acknowledge receipt within 72 hours."
+          )
+          assert expected_block in block, block
+          PY
+
+          cp "${VERIFY_TARGET_FILE}" .e2e/first-target.txt
+          cp "${VERIFY_TEMPLATE_SINGLE_TARGET}" .e2e/first-template-single.txt
+          cp "${VERIFY_TEMPLATE_BLOCK_TARGET}" .e2e/first-template-block.txt
+          cp "${VERIFY_LOCKFILE_PATH}" .e2e/first-lock.yml
+          cp "${VERIFY_MANIFEST_PATH}" .e2e/first-manifest.json
+
+      - name: Run Doclane (second pass / no-op check)
+        id: second_run
+        uses: ./action-src
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          config-path: ${{ env.VERIFY_CONFIG_PATH }}
+          lockfile-path: ${{ env.VERIFY_LOCKFILE_PATH }}
+          manifest-path: ${{ env.VERIFY_MANIFEST_PATH }}
+          source-repo-allowlist: ${{ github.repository_owner }}/*
+          create-pr: "false"
+          commit-signoff: "false"
+          commit-sign: "false"
+          template-strict: "true"
+
+      - name: Assert no-op behavior on second pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          second_noop="${{ steps.second_run.outputs.noop }}"
+          second_sha="${{ steps.second_run.outputs.resolved-sha }}"
+          second_pr="${{ steps.second_run.outputs.pr-url }}"
+
+          [[ "${second_noop}" == "true" ]]
+          [[ "${second_sha}" == "${VERIFY_SOURCE_SHA}" ]]
+          [[ -z "${second_pr}" ]]
+
+          cmp -s .e2e/first-target.txt "${VERIFY_TARGET_FILE}"
+          cmp -s .e2e/first-template-single.txt \
+            "${VERIFY_TEMPLATE_SINGLE_TARGET}"
+          cmp -s .e2e/first-template-block.txt \
+            "${VERIFY_TEMPLATE_BLOCK_TARGET}"
+          cmp -s .e2e/first-lock.yml "${VERIFY_LOCKFILE_PATH}"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          first = json.loads(Path(".e2e/first-manifest.json").read_text())
+          second = json.loads(Path("doclane-sync-manifest.json").read_text())
+          source_sha = os.environ["VERIFY_SOURCE_SHA"]
+          assert first["commit_sha"] == second["commit_sha"] == source_sha
+          assert second["files"], second
+          all_unchanged = all(
+              f.get("changed") is False for f in second["files"]
+          )
+          assert all_unchanged, second["files"]
+          PY
+
+      - name: Upload E2E artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verify-e2e-pr-artifacts
+          if-no-files-found: ignore
+          path: |
+            .github/.doclane.yml
+            .github/.doclane.lock.yml
+            doclane-sync-manifest.json
+            docs/**
+            .e2e/**

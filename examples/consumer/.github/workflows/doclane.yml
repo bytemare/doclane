@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MIT
+#
+# Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree or at
+# https://spdx.org/licenses/MIT.html
+
+name: Doclane Sync
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: doclane-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        # Pin to immutable SHAs in production repositories.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      # Configure SSH commit signing for GitHub-verified bot commits.
+      # The SSH public key must be uploaded as a signing key for the bot identity.
+      - name: Configure git SSH signing
+        shell: bash
+        env:
+          DOCLANE_GIT_SIGNING_KEY: ${{ secrets.DOCLANE_GIT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOCLANE_GIT_SIGNING_KEY:-}" ]]; then
+            echo "Missing DOCLANE_GIT_SIGNING_KEY secret" >&2
+            exit 1
+          fi
+          key_path="$RUNNER_TEMP/doclane_signing_key"
+          printf '%s\n' "$DOCLANE_GIT_SIGNING_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          git config gpg.format ssh
+          git config user.signingkey "$key_path"
+
+      # Pin by immutable commit SHA in production.
+      - name: Run Doclane
+        # Replace the placeholder SHA below with a reviewed Doclane action commit SHA.
+        uses: bytemare/doclane@0000000000000000000000000000000000000000
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          config-path: .github/.doclane.yml
+          lockfile-path: .github/.doclane.lock.yml
+          source-repo-allowlist: org/*
+          create-pr: "true"
+          commit-signoff: "true"
+          commit-sign: "true"
+
+      - name: Upload manifest
+        # Pin to immutable SHAs in production repositories.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: doclane-sync-manifest
+          path: doclane-sync-manifest.json
